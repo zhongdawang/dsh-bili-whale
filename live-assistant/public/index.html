@@ -61,11 +61,22 @@
           <h2>回复内容</h2>
           <label class="check strong"><input type="checkbox" id="llmEnabled"> 用 LLM 生成回复</label>
           <div class="grid2">
+            <label class="field"><span>服务商</span>
+              <select id="llmProvider">
+                <option value="deepseek">DeepSeek</option>
+                <option value="openai">OpenAI</option>
+                <option value="custom">自定义</option>
+              </select>
+            </label>
+            <label class="field"><span>模型</span>
+              <input id="llmModel" list="modelOptions" placeholder="deepseek-chat">
+              <datalist id="modelOptions"></datalist>
+            </label>
             <label class="field"><span>Base URL</span><input id="llmBaseUrl" placeholder="https://api.deepseek.com"></label>
-            <label class="field"><span>模型</span><input id="llmModel" placeholder="deepseek-chat"></label>
             <label class="field"><span>密钥环境变量名</span><input id="llmKeyEnv" placeholder="LLM_API_KEY"></label>
             <label class="field"><span>Temperature</span><input id="llmTemperature" type="number" step="0.1" min="0" max="2"></label>
           </div>
+          <div class="row"><button id="btnModels" class="ghost">获取模型列表</button><span class="hint" id="modelsResult"></span></div>
           <label class="field"><span>System Prompt</span><textarea id="llmPrompt" rows="4"></textarea></label>
 
           <label class="field">
@@ -82,6 +93,10 @@
 
         <section class="card">
           <h2>凭据 / 密钥</h2>
+          <div class="row" style="margin-bottom:12px">
+            <button id="btnQrLogin" class="primary">扫码登录</button>
+            <span class="hint" style="margin:0">手机 B 站 App 扫码，自动写入登录态</span>
+          </div>
           <div class="hint" id="credPath">—</div>
           <div class="badges" id="secretBadges"></div>
           <div class="grid2">
@@ -146,7 +161,20 @@
 
     <footer>本地控制台 · 默认只监听 127.0.0.1 · 密钥不会回显</footer>
   </div>
+  <div id="qrModal" class="modal hidden">
+    <div class="modalCard">
+      <h3>扫码登录 B 站</h3>
+      <p class="hint">用手机 B 站 App 扫描，确认后自动保存 SESSDATA / bili_jct / buvid3。</p>
+      <img id="qrImg" alt="登录二维码">
+      <div id="qrStatus" class="hint">生成中…</div>
+      <div class="row">
+        <button id="btnQrRefresh" class="ghost">重新生成</button>
+        <button id="btnQrClose" class="ghost">关闭</button>
+      </div>
+    </div>
+  </div>
   <div id="toast" class="toast"></div>
+  <script src="/qrcode.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

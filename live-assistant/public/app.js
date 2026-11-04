@@ -2,6 +2,31 @@ const $ = (id) => document.getElementById(id)
 let lastConfig = null
 let toastTimer = null
 
+const PROVIDERS = {
+  deepseek: { baseUrl: 'https://api.deepseek.com', models: ['deepseek-chat', 'deepseek-reasoner'] },
+  openai: { baseUrl: 'https://api.openai.com/v1', models: ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini'] },
+  custom: null,
+}
+
+function inferProvider(baseUrl) {
+  const value = String(baseUrl ?? '').toLowerCase()
+  if (value.includes('deepseek')) return 'deepseek'
+  if (value.includes('openai')) return 'openai'
+  return 'custom'
+}
+
+function setModelOptions(models = [], reset = false) {
+  const datalist = $('modelOptions')
+  const existing = reset ? [] : [...datalist.options].map((option) => option.value)
+  const all = [...new Set([...existing, ...models.filter(Boolean)])]
+  datalist.textContent = ''
+  for (const model of all) {
+    const option = document.createElement('option')
+    option.value = model
+    datalist.appendChild(option)
+  }
+}
+
 async function api(path, method = 'GET', body) {
   const response = await fetch(path, {
     method,
@@ -55,6 +80,10 @@ function fill(config) {
   $('llmKeyEnv').value = config.reply?.llm?.apiKeyEnv ?? 'LLM_API_KEY'
   $('llmTemperature').value = config.reply?.llm?.temperature ?? 0.8
   $('llmPrompt').value = config.reply?.llm?.systemPrompt ?? ''
+
+  const provider = inferProvider(config.reply?.llm?.baseUrl)
+  $('llmProvider').value = provider
+  setModelOptions(PROVIDERS[provider]?.models ?? [])
 
   $('globalCooldown').value = config.throttle?.globalCooldownMs ?? 10000
   $('perUserCooldown').value = config.throttle?.perUserCooldownMs ?? 120000
@@ -212,6 +241,107 @@ async function testLlm() {
   }
 }
 
+async function fetchModels() {
+  $('modelsResult').textContent = '获取中…'
+  try {
+    if ($('llmKey').value.trim()) await saveSecrets()
+    await saveConfig(true)
+    const data = await api('/api/models', 'POST', {})
+    setModelOptions(data.models)
+    if (!$('llmModel').value.trim() && data.models.length) $('llmModel').value = data.models[0]
+    $('modelsResult').textContent = data.models.length
+      ? `拿到 ${data.models.length} 个模型，点模型框选择`
+      : '接口没返回模型，手动填即可'
+  } catch (e) {
+    $('modelsResult').textContent = `失败：${e.message}`
+  }
+}
+
+let qrId = null
+let qrTimer = null
+let qrClosed = false
+
+function renderQr(url) {
+  try {
+    const qr = qrcode(0, 'M')
+    qr.addData(url)
+    qr.make()
+    $('qrImg').src = qr.createDataURL(6, 8)
+  } catch (e) {
+    $('qrStatus').textContent = `二维码渲染失败：${e.message}`
+  }
+}
+
+async function pollQr() {
+  if (!qrId || qrClosed) return
+  try {
+    const data = await api(`/api/auth/qr/poll?id=${encodeURIComponent(qrId)}`)
+    if (data.status === 'success') {
+      $('qrStatus').textContent = data.account
+        ? `登录成功：${data.account.uname} (mid ${data.account.mid})`
+        : '登录成功'
+      if (data.secrets) renderSecrets(data.secrets)
+      for (const id of ['sessdata', 'biliJct', 'buvid3']) $(id).value = ''
+      toast('扫码登录成功')
+      setTimeout(() => { if (!qrClosed) $('qrModal').classList.add('hidden') }, 1600)
+      return
+    }
+    const labels = {
+      waiting: '等待扫码…',
+      scanned: '已扫码，请在手机上确认…',
+      expired: '二维码已过期，点“重新生成”',
+      cancelled: '已取消',
+      error: `失败：${data.error || '请重试'}`,
+    }
+    $('qrStatus').textContent = labels[data.status] ?? data.status
+    if (['expired', 'error', 'cancelled'].includes(data.status)) return
+    qrTimer = setTimeout(pollQr, 2000)
+  } catch (e) {
+    $('qrStatus').textContent = `轮询失败：${e.message}`
+    qrTimer = setTimeout(pollQr, 3000)
+  }
+}
+
+async function startQrFlow() {
+  clearTimeout(qrTimer)
+  qrTimer = null
+  if (qrId) { try { await api('/api/auth/qr/cancel', 'POST', { id: qrId }) } catch {} }
+  qrId = null
+  $('qrImg').removeAttribute('src')
+  $('qrStatus').textContent = '生成中…'
+  try {
+    const data = await api('/api/auth/qr/start', 'POST', {})
+    qrId = data.id
+    renderQr(data.qrUrl)
+    $('qrStatus').textContent = '等待扫码…'
+    pollQr()
+  } catch (e) {
+    $('qrStatus').textContent = `生成失败：${e.message}`
+  }
+}
+
+async function openQrModal() {
+  qrClosed = false
+  $('qrModal').classList.remove('hidden')
+  await startQrFlow()
+}
+
+function closeQrModal() {
+  qrClosed = true
+  clearTimeout(qrTimer)
+  if (qrId) api('/api/auth/qr/cancel', 'POST', { id: qrId }).catch(() => {})
+  qrId = null
+  $('qrModal').classList.add('hidden')
+}
+
+function applyProvider() {
+  const preset = PROVIDERS[$('llmProvider').value]
+  if (!preset) return
+  $('llmBaseUrl').value = preset.baseUrl
+  $('llmModel').value = preset.models[0]
+  setModelOptions(preset.models, true)
+}
+
 async function simulate() {
   await saveConfig(true)
   const data = await api('/api/simulate', 'POST', {
@@ -257,6 +387,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('btnTest').onclick = () => testConnection().catch((e) => { $('testResult').textContent = `✗ ${e.message}` })
   $('btnSaveSecrets').onclick = () => saveSecrets().catch((e) => toast(e.message, true))
   $('btnTestLlm').onclick = () => testLlm()
+  $('btnModels').onclick = () => fetchModels()
+  $('llmProvider').onchange = () => applyProvider()
+  $('btnQrLogin').onclick = () => openQrModal().catch((e) => toast(e.message, true))
+  $('btnQrRefresh').onclick = () => startQrFlow()
+  $('btnQrClose').onclick = () => closeQrModal()
+  $('qrModal').onclick = (event) => { if (event.target === $('qrModal')) closeQrModal() }
   $('btnSim').onclick = () => simulate().catch((e) => { $('simResult').textContent = `✗ ${e.message}` })
 
   try { await load() }

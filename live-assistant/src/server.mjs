@@ -1,4 +1,5 @@
 import http from 'node:http'
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -17,10 +18,42 @@ const ROOT = path.dirname(SRC_DIR)
 const PUBLIC = path.join(ROOT, 'public')
 const CLI = path.join(SRC_DIR, 'cli.mjs')
 const TRIGGERS = ['owner', 'mention', 'keyword', 'all']
+const PASSPORT = 'https://passport.bilibili.com'
+const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+
+async function passportGet(url) {
+  const response = await fetch(url, {
+    redirect: 'error',
+    signal: AbortSignal.timeout(15_000),
+    headers: { 'user-agent': BROWSER_UA, referer: `${PASSPORT}/login` },
+  })
+  if (!response.ok) throw new Error(`B站登录请求失败（HTTP ${response.status}）`)
+  const body = await response.json()
+  if (body.code !== 0) throw new Error(body.message || 'B站登录请求失败')
+  return { data: body.data ?? {}, response }
+}
+
+function cookiesFrom(response) {
+  const values = {}
+  const list = typeof response.headers.getSetCookie === 'function' ? response.headers.getSetCookie() : []
+  for (const cookie of list) {
+    const pair = cookie.split(';', 1)[0]
+    const index = pair.indexOf('=')
+    if (index < 0) continue
+    const name = pair.slice(0, index).trim()
+    if (['SESSDATA', 'bili_jct', 'buvid3'].includes(name)) values[name] = pair.slice(index + 1).trim()
+  }
+  return {
+    sessdata: values.SESSDATA ?? '',
+    bili_jct: values.bili_jct ?? '',
+    buvid3: values.buvid3 ?? '',
+  }
+}
 
 const STATIC = {
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
+  '/qrcode.js': ['qrcode.js', 'text/javascript; charset=utf-8'],
   '/style.css': ['style.css', 'text/css; charset=utf-8'],
 }
 
@@ -140,6 +173,151 @@ export function startUiServer({ port = 7788, host = '127.0.0.1', configFile = pa
       llmKeyEnv: keyEnv,
       hasLlmKey: !!(process.env[keyEnv] || env[keyEnv]),
     }
+  }
+
+  // ── 扫码登录 ───────────────────────────────────────────────
+  const qrSessions = new Map()
+  let lastQrStart = 0
+
+  const publicQr = (session) => ({
+    id: session.id,
+    status: session.status,
+    expiresAt: session.expiresAt,
+    ...(session.account ? { account: session.account } : {}),
+    ...(session.error ? { error: session.error } : {}),
+    ...(session.status === 'success' ? { secrets: secretState() } : {}),
+  })
+
+  async function verifyCredential(cred) {
+    const cookie = `SESSDATA=${cred.sessdata}; bili_jct=${cred.bili_jct}${cred.buvid3 ? `; buvid3=${cred.buvid3}` : ''}`
+    const response = await fetch('https://api.bilibili.com/x/web-interface/nav', {
+      headers: { 'user-agent': BROWSER_UA, referer: 'https://www.bilibili.com/', cookie },
+      signal: AbortSignal.timeout(15_000),
+    })
+    const body = await response.json().catch(() => ({}))
+    const data = body?.data ?? {}
+    if (data.isLogin !== true || !data.mid) throw new Error('登录验证失败，请重新扫码')
+    return { mid: String(data.mid), uname: String(data.uname ?? '') }
+  }
+
+  function saveQrCredentials(cred) {
+    const file = credentialPath()
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    const temp = `${file}.${crypto.randomUUID()}.tmp`
+    try {
+      const fd = fs.openSync(temp, 'wx', 0o600)
+      try {
+        fs.writeFileSync(fd, JSON.stringify(cred, null, 2) + '\n')
+        fs.fsyncSync(fd)
+      } finally { fs.closeSync(fd) }
+      fs.renameSync(temp, file)
+      try { fs.chmodSync(file, 0o600) } catch {}
+    } finally {
+      if (fs.existsSync(temp)) { try { fs.unlinkSync(temp) } catch {} }
+    }
+  }
+
+  async function startQr() {
+    if (Date.now() < lastQrStart + 2000) throw new Error('请稍等两秒再生成二维码')
+    lastQrStart = Date.now()
+    const { data } = await passportGet(`${PASSPORT}/x/passport-login/web/qrcode/generate`)
+    let url
+    try { url = new URL(data.url) } catch { throw new Error('二维码响应无效，请重试') }
+    if (!['https://passport.bilibili.com', 'https://account.bilibili.com'].includes(url.origin)
+      || url.username || url.password) throw new Error('二维码响应无效，请重试')
+    if (!/^[A-Za-z0-9_-]{1,256}$/.test(data.qrcode_key ?? '')) throw new Error('二维码响应无效，请重试')
+
+    const now = Date.now()
+    for (const [id, session] of qrSessions) {
+      if (!['waiting', 'scanned'].includes(session.status) || now - session.createdAt > 10 * 60_000) qrSessions.delete(id)
+    }
+    const session = {
+      id: crypto.randomUUID(),
+      key: data.qrcode_key,
+      status: 'waiting',
+      createdAt: now,
+      expiresAt: now + 180_000,
+      nextPoll: 0,
+      account: null,
+      error: '',
+    }
+    qrSessions.set(session.id, session)
+    return { ...publicQr(session), qrUrl: url.href }
+  }
+
+  async function pollQr(id) {
+    const session = qrSessions.get(String(id ?? ''))
+    if (!session) throw new Error('二维码已失效，请重新生成')
+    if (['success', 'expired', 'cancelled', 'error'].includes(session.status)) return publicQr(session)
+    if (Date.now() >= session.expiresAt) {
+      session.status = 'expired'
+      session.key = null
+      return publicQr(session)
+    }
+    if (session.flight) return session.flight
+    if (Date.now() < session.nextPoll) return publicQr(session)
+    session.nextPoll = Date.now() + 2000
+
+    session.flight = (async () => {
+      try {
+        const url = new URL('/x/passport-login/web/qrcode/poll', PASSPORT)
+        url.searchParams.set('qrcode_key', session.key)
+        const { data, response } = await passportGet(url)
+        const code = Number(data.code)
+        if (code === 86101) session.status = 'waiting'
+        else if (code === 86090) session.status = 'scanned'
+        else if (code === 86038) session.status = 'expired'
+        else if (code === 0) {
+          const cred = cookiesFrom(response)
+          if (!/^[0-9a-fA-F]{32}$/.test(cred.bili_jct) || cred.sessdata.length < 20
+            || /[\r\n;\x00-\x1f\x7f]/.test(Object.values(cred).join(''))) {
+            throw new Error('登录态不完整，请重新扫码')
+          }
+          session.account = await verifyCredential(cred)
+          saveQrCredentials(cred)
+          session.status = 'success'
+        } else {
+          throw new Error('无法识别登录状态，请重新扫码')
+        }
+      } catch (e) {
+        session.status = 'error'
+        session.error = e.message
+      } finally {
+        if (['success', 'expired', 'cancelled', 'error'].includes(session.status)) session.key = null
+        session.flight = null
+      }
+      return publicQr(session)
+    })()
+    return session.flight
+  }
+
+  function cancelQr(id) {
+    const session = qrSessions.get(String(id ?? ''))
+    if (!session) return { status: 'cancelled' }
+    if (!['success', 'error'].includes(session.status)) session.status = 'cancelled'
+    session.key = null
+    return publicQr(session)
+  }
+
+  async function listModels() {
+    const cfg = loadConfig(configFile)
+    const llm = cfg.reply.llm
+    const keyEnv = llm.apiKeyEnv || 'LLM_API_KEY'
+    const key = process.env[keyEnv] || parseEnvFile(envFile)[keyEnv]
+    if (!key) throw new Error(`先保存 ${keyEnv}`)
+    const base = String(llm.baseUrl || '').replace(/\/+$/, '')
+    if (!/^https?:\/\//.test(base)) throw new Error('Base URL 不合法')
+    const response = await fetch(`${base}/models`, {
+      headers: { authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (!response.ok) throw new Error(`模型列表 HTTP ${response.status}`)
+    const data = await response.json().catch(() => ({}))
+    const models = (Array.isArray(data.data) ? data.data : Array.isArray(data) ? data : [])
+      .map((item) => (typeof item === 'string' ? item : item?.id))
+      .filter((id) => typeof id === 'string' && id)
+      .slice(0, 200)
+    return { models, baseUrl: base }
   }
 
   const status = () => {
@@ -352,6 +530,12 @@ export function startUiServer({ port = 7788, host = '127.0.0.1', configFile = pa
       return
     }
 
+    if (req.method === 'GET' && pathname === '/api/auth/qr/poll') {
+      try { json(res, 200, { ok: true, ...(await pollQr(url.searchParams.get('id'))) }) }
+      catch (e) { json(res, 400, { error: e.message }) }
+      return
+    }
+
     if (req.method === 'GET' && pathname === '/api/logs/stream') {
       res.writeHead(200, {
         'content-type': 'text/event-stream',
@@ -391,6 +575,18 @@ export function startUiServer({ port = 7788, host = '127.0.0.1', configFile = pa
       }
       if (pathname === '/api/secrets') {
         json(res, 200, { ok: true, secrets: await saveSecrets(body) })
+        return
+      }
+      if (pathname === '/api/auth/qr/start') {
+        json(res, 200, { ok: true, ...(await startQr()) })
+        return
+      }
+      if (pathname === '/api/auth/qr/cancel') {
+        json(res, 200, { ok: true, ...cancelQr(body.id) })
+        return
+      }
+      if (pathname === '/api/models') {
+        json(res, 200, { ok: true, ...(await listModels()) })
         return
       }
       if (pathname === '/api/test') {

@@ -19,7 +19,9 @@ node src/cli.mjs ui
 控制台里可以：
 
 - 填房间号、互动方式、关键词、限速、过滤规则
-- 填 SESSDATA / bili_jct / buvid3 和 LLM Key（保存后不回显）
+- **扫码登录 B 站**（手机 App 扫一下，自动写入 SESSDATA / bili_jct / buvid3）
+- 也可以手动填 SESSDATA / bili_jct / buvid3 和 LLM Key（保存后不回显）
+- LLM 服务商预设（DeepSeek / OpenAI / 自定义）+ 模型选择 + 一键拉取模型列表
 - 测试连接、测试 LLM、模拟一条弹幕看会怎么回
 - 一键启动 dry-run / 真实发送、停止
 - 看实时日志
@@ -47,6 +49,14 @@ node src/cli.mjs start --room 6 --go
 ```
 
 ## 凭据
+
+### 方式一：扫码（推荐）
+
+打开控制台 → 「凭据 / 密钥」→「扫码登录」→ 手机 B 站 App 扫码确认。 登录成功后会自动写入 `~/.bili-ai/credentials.json`，不用手动抄 Cookie。
+
+二维码 3 分钟有效；过期点「重新生成」。扫码只保存 `SESSDATA` / `bili_jct` / `buvid3`，不会保存密码。
+
+### 方式二：手动填
 
 `SESSDATA`、`bili_jct`、`buvid3` 三个值。`SESSDATA` 是 HttpOnly，必须在浏览器 F12 → Application → Cookies → `https://www.bilibili.com` 里手动复制，`document.cookie` 读不到。
 
@@ -87,6 +97,18 @@ cp env.example .env
 
 ### 接 LLM
 
+控制台里可以直接选服务商：
+
+| 服务商 | Base URL | 常用模型 |
+|---|---|---|
+| DeepSeek | `https://api.deepseek.com` | `deepseek-chat` / `deepseek-reasoner` |
+| OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` / `gpt-4o` |
+| 自定义 | 自己填 | 自己填 |
+
+填完 Key 后点「获取模型列表」，会调用 `GET /models` 把可用模型拉下来（接口不支持就手动填）。
+
+配置长这样：
+
 ```json
 "llm": {
   "enabled": true,
@@ -96,7 +118,7 @@ cp env.example .env
 }
 ```
 
-然后 `export LLM_API_KEY=...`。`baseUrl` 直接拼 `/chat/completions`，如果服务是 OpenAI 的，填 `https://api.openai.com/v1`。
+然后 `export LLM_API_KEY=...` 或写进 `.env`。`baseUrl` 直接拼 `/chat/completions`。
 
 规则命中但没写死回复时，才会走 LLM；再不行才用 `templateReplies` 兜底。
 
