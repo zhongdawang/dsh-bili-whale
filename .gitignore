@@ -22,6 +22,11 @@ node_modules/
 *.png
 !examples/**/*.png
 
+# ── live-assistant 本地配置与运行状态 ───────────────────
+live-assistant/config.json
+live-assistant/live-assistant.config.json
+live-assistant/data/
+
 # ── 本机/编辑器 ─────────────────────────────────────────
 .env
 .env.*

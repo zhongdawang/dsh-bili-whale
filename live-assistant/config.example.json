@@ -1,0 +1,47 @@
+{
+  "_readme": "复制成 config.json 再改。默认 dryRun=true：只看不发；确认没问题后把 dryRun 改 false 或用 start --go。",
+  "room": "6",
+  "dryRun": true,
+  "dataDir": "./data",
+  "credentialsFile": "",
+  "reply": {
+    "triggers": ["mention", "keyword"],
+    "ownerMid": 0,
+    "aliases": ["小鱼"],
+    "ignoreUids": [],
+    "ignoreNames": ["机器人", "直播通知"],
+    "ignorePatterns": ["^\\s*$", "^关注", "^点赞"],
+    "keywordRules": [
+      { "match": "你好", "reply": "你好呀 {name}～" },
+      { "match": "晚安", "reply": "晚安 {name}，早点休息" },
+      { "match": "/^(在吗|在不在)[?？]?$/", "reply": "在的 {name}" }
+    ],
+    "templateReplies": ["在呢", "收到～", "嗯嗯"],
+    "maxLen": 20,
+    "llm": {
+      "enabled": false,
+      "baseUrl": "https://api.deepseek.com",
+      "model": "deepseek-chat",
+      "apiKeyEnv": "LLM_API_KEY",
+      "temperature": 0.8,
+      "systemPrompt": "你是 B 站直播间里的一个观众。回复要短、自然、像真人聊天，不超过 20 个字；不要刷屏，不要提自己是 AI，不要复述对方的话。"
+    }
+  },
+  "throttle": {
+    "globalCooldownMs": 10000,
+    "perUserCooldownMs": 90000,
+    "dailyCap": 60,
+    "sameTextWindowMs": 600000
+  },
+  "welcome": {
+    "enabled": false,
+    "text": "欢迎 {name} 进入直播间～"
+  },
+  "gift": {
+    "enabled": false,
+    "text": "感谢 {name} 的 {gift}～"
+  },
+  "entry": {
+    "enabled": true
+  }
+}
