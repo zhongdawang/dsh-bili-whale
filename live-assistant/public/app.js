@@ -80,6 +80,7 @@ function fill(config) {
   $('llmModel').value = config.reply?.llm?.model ?? ''
   $('llmKeyEnv').value = config.reply?.llm?.apiKeyEnv ?? 'LLM_API_KEY'
   $('llmTemperature').value = config.reply?.llm?.temperature ?? 0.8
+  $('llmMaxTokens').value = config.reply?.llm?.maxTokens ?? 512
   $('llmPrompt').value = config.reply?.llm?.systemPrompt ?? ''
 
   const provider = inferProvider(config.reply?.llm?.baseUrl)
@@ -122,6 +123,7 @@ function collectConfig() {
         baseUrl: $('llmBaseUrl').value.trim(),
         model: $('llmModel').value.trim(),
         apiKeyEnv: $('llmKeyEnv').value.trim() || 'LLM_API_KEY',
+        maxTokens: num('llmMaxTokens', 512),
         temperature: num('llmTemperature', 0.8),
         systemPrompt: $('llmPrompt').value,
       },

@@ -124,9 +124,12 @@ cp env.example .env
   "enabled": true,
   "baseUrl": "https://api.deepseek.com",
   "model": "deepseek-chat",
-  "apiKeyEnv": "LLM_API_KEY"
+  "apiKeyEnv": "LLM_API_KEY",
+  "maxTokens": 512
 }
 ```
+
+> 推理模型（`deepseek-flash` / `deepseek-reasoner`）会先消耗 reasoning tokens。 `maxTokens` 太小（比如 80）会导致正文为空，然后退回模板回复。默认 512；如果还是空，程序会自动翻倍重试一次。
 
 然后 `export LLM_API_KEY=...` 或写进 `.env`。`baseUrl` 直接拼 `/chat/completions`。
 
