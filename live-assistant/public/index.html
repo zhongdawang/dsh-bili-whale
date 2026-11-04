@@ -119,11 +119,12 @@
         <section class="card">
           <h2>限速与过滤</h2>
           <div class="grid4">
-            <label class="field"><span>全局冷却 ms</span><input id="globalCooldown" type="number" min="1000"></label>
-            <label class="field"><span>同用户冷却 ms</span><input id="perUserCooldown" type="number" min="0"></label>
-            <label class="field"><span>每天上限</span><input id="dailyCap" type="number" min="0"></label>
-            <label class="field"><span>重复内容窗口 ms</span><input id="sameTextWindow" type="number" min="0"></label>
+            <label class="field"><span>全局冷却（秒）</span><input id="globalCooldown" type="number" min="1" step="0.5"></label>
+            <label class="field"><span>同用户冷却（秒）</span><input id="perUserCooldown" type="number" min="0" step="1"></label>
+            <label class="field"><span>每天上限（条）</span><input id="dailyCap" type="number" min="0" step="1"></label>
+            <label class="field"><span>重复内容窗口（秒）</span><input id="sameTextWindow" type="number" min="0" step="1"></label>
           </div>
+          <div class="hint">界面按秒填；保存到配置文件时仍然存毫秒（×1000）。</div>
           <div class="grid2">
             <label class="field"><span>忽略 UID（逗号）</span><input id="ignoreUids" placeholder="123, 456"></label>
             <label class="field"><span>忽略昵称关键词（逗号）</span><input id="ignoreNames" placeholder="机器人, 直播通知"></label>

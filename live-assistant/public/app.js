@@ -87,10 +87,12 @@ function fill(config) {
   $('llmProvider').value = provider
   setModelOptions(PROVIDERS[provider]?.models ?? [])
 
-  $('globalCooldown').value = config.throttle?.globalCooldownMs ?? 10000
-  $('perUserCooldown').value = config.throttle?.perUserCooldownMs ?? 120000
+  // 配置里存毫秒；界面统一显示成秒。
+  const toSec = (ms, fallbackMs) => Number(((Number(ms ?? fallbackMs) || 0) / 1000).toFixed(1))
+  $('globalCooldown').value = toSec(config.throttle?.globalCooldownMs, 10000)
+  $('perUserCooldown').value = toSec(config.throttle?.perUserCooldownMs, 120000)
   $('dailyCap').value = config.throttle?.dailyCap ?? 120
-  $('sameTextWindow').value = config.throttle?.sameTextWindowMs ?? 600000
+  $('sameTextWindow').value = toSec(config.throttle?.sameTextWindowMs, 600000)
 
   $('welcomeEnabled').checked = !!config.welcome?.enabled
   $('welcomeText').value = config.welcome?.text ?? ''
@@ -129,10 +131,11 @@ function collectConfig() {
       },
     },
     throttle: {
-      globalCooldownMs: num('globalCooldown', 10000),
-      perUserCooldownMs: num('perUserCooldown', 120000),
+      // 界面是秒，写回配置时换成毫秒。
+      globalCooldownMs: Math.max(1000, Math.round(num('globalCooldown', 10) * 1000)),
+      perUserCooldownMs: Math.max(0, Math.round(num('perUserCooldown', 120) * 1000)),
       dailyCap: num('dailyCap', 120),
-      sameTextWindowMs: num('sameTextWindow', 600000),
+      sameTextWindowMs: Math.max(0, Math.round(num('sameTextWindow', 600) * 1000)),
     },
     welcome: { enabled: $('welcomeEnabled').checked, text: $('welcomeText').value },
     gift: { enabled: $('giftEnabled').checked, text: $('giftText').value },
