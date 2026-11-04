@@ -69,6 +69,7 @@ export async function startAssistant({ config, api, dryRun = true, verbose = fal
   const seen = new Set()
   const lastUser = new Map()
   const lastText = new Map()
+  const selfSent = new Map()   // 自己刚发出去的回复 → 时间，用来忽略回声
   const recent = []
   let lastGlobal = 0
   let replying = false
@@ -130,6 +131,8 @@ export async function startAssistant({ config, api, dryRun = true, verbose = fal
       log(`[dry:${reason}] 回复 ${event.uname}：${reply}`)
       return true
     }
+    // 先记下来：B 站会把这条回复回传，onDanmaku 看到同样文字就跳过。
+    selfSent.set(reply, Date.now())
     const result = await api.sendDanmaku({ roomId, msg: reply, replyMid: event.uid, replyName: event.uname })
     if (result.code === 0) {
       state.date = today()
@@ -148,6 +151,17 @@ export async function startAssistant({ config, api, dryRun = true, verbose = fal
     if (seen.size > 5000) seen.delete(seen.values().next().value)
 
     if (verbose) log(`  ${event.uname}(${event.uid}): ${event.text}`)
+
+    // 单号模式：自己发的测试弹幕也会被 B 站回传；但自己刚发出去的回复要忽略，防自问自答循环。
+    if (config.reply.allowSelf && self.mid && event.uid === self.mid) {
+      const now = Date.now()
+      for (const [text, at] of selfSent) if (now - at > 10 * 60_000) selfSent.delete(text)
+      if (selfSent.has(event.text.trim())) {
+        if (verbose) log('  ↳ 忽略自己刚发出去的回复')
+        return
+      }
+    }
+
     recent.push({ uname: event.uname, text: event.text })
     if (recent.length > 10) recent.shift()
 

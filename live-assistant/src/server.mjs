@@ -269,6 +269,17 @@ export function startUiServer({ port = 7788, host = '127.0.0.1', configFile = pa
         else if (code === 86038) session.status = 'expired'
         else if (code === 0) {
           const cred = cookiesFrom(response)
+          if (!cred.buvid3) {
+            // 有些账号扫码时不会下发 buvid3；补一个设备标识，方便原版工具链也能用。
+            try {
+              const finger = await fetch('https://api.bilibili.com/x/frontend/finger/spi', {
+                headers: { 'user-agent': BROWSER_UA },
+                signal: AbortSignal.timeout(10_000),
+              })
+              const body = await finger.json().catch(() => ({}))
+              cred.buvid3 = String(body?.data?.b_3 ?? '')
+            } catch {}
+          }
           if (!/^[0-9a-fA-F]{32}$/.test(cred.bili_jct) || cred.sessdata.length < 20
             || /[\r\n;\x00-\x1f\x7f]/.test(Object.values(cred).join(''))) {
             throw new Error('登录态不完整，请重新扫码')
@@ -343,6 +354,7 @@ export function startUiServer({ port = 7788, host = '127.0.0.1', configFile = pa
     const rIn = input.reply ?? {}
     const r = { ...(raw.reply ?? {}) }
     if (rIn.triggers !== undefined) r.triggers = toList(rIn.triggers).filter((t) => TRIGGERS.includes(t))
+    if (rIn.allowSelf !== undefined) r.allowSelf = toBool(rIn.allowSelf, rBase.allowSelf)
     if (rIn.ownerMid !== undefined) r.ownerMid = toInt(rIn.ownerMid, rBase.ownerMid)
     if (rIn.aliases !== undefined) r.aliases = toList(rIn.aliases)
     if (rIn.ignoreUids !== undefined) r.ignoreUids = toList(rIn.ignoreUids).map(Number).filter(Number.isFinite)

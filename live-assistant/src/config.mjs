@@ -10,6 +10,8 @@ export const DEFAULTS = {
   reply: {
     // owner = 只回主人；mention = 有人 @ 她；keyword = 命中关键词；all = 所有弹幕
     triggers: ['mention', 'keyword'],
+    // 单号测试用：允许回复“自己账号”发的弹幕；会跳过自己刚发出去的回复，防循环。
+    allowSelf: false,
     ownerMid: 0,
     aliases: [],
     ignoreUids: [],

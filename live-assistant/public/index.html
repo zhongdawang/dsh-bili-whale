@@ -50,6 +50,8 @@
             <label class="check"><input type="checkbox" data-trigger="all"> 所有弹幕都回</label>
           </div>
           <div class="hint">四个可以多选。优先级：owner → keyword → mention → all。</div>
+          <label class="check strong"><input type="checkbox" id="allowSelf"> 允许回复本账号自己的弹幕（单号测试用）</label>
+          <div class="hint">只有你只有一个号、想自己发弹幕测试时打开；它会忽略自己刚发出去的回复，防止循环。</div>
           <div class="grid2">
             <label class="field"><span>主人 mid</span><input id="ownerMid" type="number" min="0" placeholder="只回主人时必填"></label>
             <label class="field"><span>别名（逗号分隔）</span><input id="aliases" placeholder="小鱼, 小助手"></label>

@@ -65,6 +65,7 @@ function fill(config) {
   const triggers = new Set(config.reply?.triggers ?? [])
   document.querySelectorAll('[data-trigger]').forEach((el) => { el.checked = triggers.has(el.dataset.trigger) })
 
+  $('allowSelf').checked = !!config.reply?.allowSelf
   $('ownerMid').value = config.reply?.ownerMid || ''
   $('aliases').value = (config.reply?.aliases ?? []).join(', ')
   $('ignoreUids').value = (config.reply?.ignoreUids ?? []).join(', ')
@@ -107,6 +108,7 @@ function collectConfig() {
     room: $('room').value.trim(),
     reply: {
       triggers: [...document.querySelectorAll('[data-trigger]:checked')].map((el) => el.dataset.trigger),
+      allowSelf: $('allowSelf').checked,
       ownerMid: num('ownerMid', 0),
       aliases: csv('aliases'),
       ignoreUids: csv('ignoreUids'),

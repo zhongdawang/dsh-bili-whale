@@ -51,7 +51,7 @@ export function compileIgnore(config) {
 export function decide(event, replyConfig, { selfMid = 0, selfName = '' } = {}) {
   const text = String(event?.text ?? '').trim()
   if (!text) return null
-  if (selfMid && Number(event.uid) === Number(selfMid)) return null
+  if (selfMid && Number(event.uid) === Number(selfMid) && !replyConfig.allowSelf) return null
   if ((replyConfig.ignoreUids ?? []).map(Number).includes(Number(event.uid))) return null
   if ((replyConfig.ignoreNames ?? []).some((name) => name && String(event.uname ?? '').includes(name))) return null
   if (compileIgnore(replyConfig)(text)) return null
