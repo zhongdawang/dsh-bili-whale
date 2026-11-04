@@ -244,7 +244,9 @@ async function testLlm() {
   try {
     await saveConfig(true)
     const data = await api('/api/test/llm', 'POST', {})
-    $('llmResult').textContent = `回复：${data.reply}`
+    const text = data.final ?? data.reply
+    const cut = data.final && data.reply && data.final !== data.reply
+    $('llmResult').textContent = `回复：${text}${cut ? `（已按 ${data.maxLen} 字截断）` : ''}`
   } catch (e) {
     $('llmResult').textContent = `失败：${e.message}`
   }

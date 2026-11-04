@@ -10,6 +10,7 @@ import { DEFAULTS, merge, loadConfig } from './config.mjs'
 import { loadCredentials } from './credentials.mjs'
 import { BiliLiveApi } from './api.mjs'
 import { explainDecision } from './assistant.mjs'
+import { finalizeReply } from './reply.mjs'
 import { generateReply } from './llm.mjs'
 import { loadEnvFile, readJson } from './util.mjs'
 
@@ -613,7 +614,7 @@ export function startUiServer({ port = 7788, host = '127.0.0.1', configFile = pa
           event: { uname: '测试观众', text: '你好，随便聊一句' },
           config: cfg.reply.llm,
         })
-        json(res, 200, { ok: true, reply })
+        json(res, 200, { ok: true, reply, final: finalizeReply(reply, cfg.reply.maxLen), maxLen: cfg.reply.maxLen })
         return
       }
       if (pathname === '/api/simulate') {
