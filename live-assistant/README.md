@@ -125,9 +125,15 @@ cp env.example .env
   "baseUrl": "https://api.deepseek.com",
   "model": "deepseek-chat",
   "apiKeyEnv": "LLM_API_KEY",
-  "maxTokens": 512
+  "maxTokens": 512,
+  "contextMessages": 0
 }
 ```
+
+`contextMessages` 是每次回复带多少条上一段弹幕：
+
+- `0`（默认）= 每条弹幕独立回答，不会接上一段话
+- `4` = 带最近 4 条，适合连续对话
 
 > 推理模型（`deepseek-flash` / `deepseek-reasoner`）会先消耗 reasoning tokens。 `maxTokens` 太小（比如 80）会导致正文为空，然后退回模板回复。默认 512；如果还是空，程序会自动翻倍重试一次。
 

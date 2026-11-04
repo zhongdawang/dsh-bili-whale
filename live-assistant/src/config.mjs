@@ -29,6 +29,8 @@ export const DEFAULTS = {
       model: 'deepseek-chat',
       apiKeyEnv: 'LLM_API_KEY',
       maxTokens: 512,
+      // 给 LLM 带多少条上一段对话；0 = 每条弹幕独立回答，不继承上下文。
+      contextMessages: 0,
       temperature: 0.8,
       systemPrompt: '你是 B 站直播间里的一个观众。回复要短、自然、像真人聊天，不超过 20 个字；不要刷屏，不要提自己是 AI，不要复述对方的话。对方让你夸他时，要具体夸，不要只回“嗯嗯”“哈哈”。',
     },

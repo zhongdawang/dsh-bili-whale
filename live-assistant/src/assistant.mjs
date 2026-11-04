@@ -150,18 +150,17 @@ export async function startAssistant({ config, api, dryRun = true, verbose = fal
     seen.add(event.dmid)
     if (seen.size > 5000) seen.delete(seen.values().next().value)
 
-    if (verbose) log(`  ${event.uname}(${event.uid}): ${event.text}`)
-
     // 单号模式：自己发的测试弹幕也会被 B 站回传；但自己刚发出去的回复要忽略，防自问自答循环。
     if (config.reply.allowSelf && self.mid && event.uid === self.mid) {
       const now = Date.now()
       for (const [text, at] of selfSent) if (now - at > 10 * 60_000) selfSent.delete(text)
       if (selfSent.has(event.text.trim())) {
-        if (verbose) log('  ↳ 忽略自己刚发出去的回复')
+        if (verbose) log('  ↳ 收到自己的回声，已忽略（不是重复发送）')
         return
       }
     }
 
+    if (verbose) log(`  ${event.uname}(${event.uid}): ${event.text}`)
     recent.push({ uname: event.uname, text: event.text })
     if (recent.length > 10) recent.shift()
 

@@ -378,6 +378,7 @@ export function startUiServer({ port = 7788, host = '127.0.0.1', configFile = pa
         model: toText(lIn.model, llmBase.model).trim().slice(0, 120),
         apiKeyEnv: toText(lIn.apiKeyEnv, llmBase.apiKeyEnv).trim().slice(0, 80) || 'LLM_API_KEY',
         maxTokens: toInt(lIn.maxTokens, llmBase.maxTokens, 64, 4096),
+        contextMessages: toInt(lIn.contextMessages, llmBase.contextMessages, 0, 20),
         temperature: Math.min(2, Math.max(0, Number(lIn.temperature ?? llmBase.temperature) || 0)),
         systemPrompt: toText(lIn.systemPrompt, llmBase.systemPrompt).slice(0, 4000),
       }

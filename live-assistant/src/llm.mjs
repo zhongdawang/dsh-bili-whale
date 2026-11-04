@@ -11,7 +11,10 @@ export async function generateReply({ event, config, apiKey, recent = [], fetchI
   if (!key) throw new Error(`没有 LLM 密钥：请设置环境变量 ${llm.apiKeyEnv || 'LLM_API_KEY'}`)
   const base = String(llm.baseUrl ?? 'https://api.deepseek.com').replace(/\/+$/, '')
   const url = `${base}/chat/completions`
-  const context = (recent ?? []).slice(-6).map((m) => ({ role: 'user', content: `观众「${m.uname}」说：${m.text}` }))
+  const contextLimit = Math.max(0, Math.min(20, Number(llm.contextMessages ?? 0) || 0))
+  const context = contextLimit > 0
+    ? (recent ?? []).slice(-contextLimit).map((m) => ({ role: 'user', content: `观众「${m.uname}」说：${m.text}` }))
+    : []
   const messages = [
     { role: 'system', content: String(llm.systemPrompt ?? '') },
     ...context,
