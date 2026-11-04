@@ -88,6 +88,10 @@ export async function startAssistant({ config, api, dryRun = true, verbose = fal
   log(`房间 ${roomId}「${roomInfo.title}」 短号=${roomInfo.short_id ?? '-'} 主播uid=${roomInfo.uid}`)
   log(`身份：${self.uname || '(匿名)'} (mid ${self.mid || 0}) · 触发=${config.reply.triggers.join('/')} · ${dryRun ? 'dry-run（只看不发）' : '真实发送'}`)
   log(`限速：全局 ${config.throttle.globalCooldownMs}ms · 同用户 ${config.throttle.perUserCooldownMs}ms · 每天 ${config.throttle.dailyCap} 条`)
+  if (config.reply.llm?.enabled) {
+    const keyEnv = config.reply.llm.apiKeyEnv || 'LLM_API_KEY'
+    if (!process.env[keyEnv]) log(`⚠ 开了 LLM 但没找到 ${keyEnv}，会退回模板回复（在控制台“凭据 / 密钥”里填）`)
+  }
 
   function passedThrottle(event, replyText) {
     const now = Date.now()
@@ -103,8 +107,10 @@ export async function startAssistant({ config, api, dryRun = true, verbose = fal
   async function deliver(event, text, reason) {
     let reply = finalizeReply(text, config.reply.maxLen)
     if (!reply) {
-      if (config.reply.llm?.enabled) {
-        try { reply = finalizeReply(await generateReply({ event, config: config.reply.llm, recent }), config.reply.maxLen) } catch (e) {
+      const llm = config.reply.llm
+      const keyEnv = llm?.apiKeyEnv || 'LLM_API_KEY'
+      if (llm?.enabled && process.env[keyEnv]) {
+        try { reply = finalizeReply(await generateReply({ event, config: llm, recent }), config.reply.maxLen) } catch (e) {
           log(`LLM 失败：${e.message}`)
         }
       }

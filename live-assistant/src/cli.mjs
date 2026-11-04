@@ -1,13 +1,18 @@
 #!/usr/bin/env node
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { loadConfig } from './config.mjs'
 import { loadCredentials, hasWriteCredentials } from './credentials.mjs'
 import { BiliLiveApi, DANMAKU_HINTS } from './api.mjs'
 import { startAssistant, explainDecision } from './assistant.mjs'
 import { parseArgs, log, loadEnvFile } from './util.mjs'
 
+const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
+
 const HELP = `直播间弹幕助手（独立版，不依赖 DSH）
 
 用法：
+  node src/cli.mjs ui       [--port 7788] [--host 127.0.0.1] [--config <文件>]
   node src/cli.mjs pre      --room <房间号>
   node src/cli.mjs start    [--room <房间号>] [--config <文件>] [--go] [--dry] [--verbose] [--seconds N]
   node src/cli.mjs send     --room <房间号> --msg "内容" (--dry | --go) [--reply-mid <uid> --reply-name <昵称>]
@@ -41,6 +46,18 @@ async function main() {
   if (!command || command === 'help' || flags.has('help')) {
     console.log(HELP)
     process.exit(command ? 0 : 2)
+  }
+
+  if (command === 'ui') {
+    const { startUiServer } = await import('./server.mjs')
+    const port = Number(values.get('port') ?? 7788)
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('端口不合法')
+    const host = String(values.get('host') ?? '127.0.0.1')
+    const configFile = values.get('config')
+      ? path.resolve(String(values.get('config')))
+      : path.join(ROOT, 'config.json')
+    startUiServer({ port, host, configFile })
+    return
   }
 
   if (command === 'pre') {

@@ -7,7 +7,26 @@
 - 按规则回复（只回主人 / 被 @ / 关键词 / 全部）
 - 可选：接 OpenAI 兼容接口，让模型生成回复
 
-## 快速开始
+## 网页控制台（推荐）
+
+不想手改 JSON、也不想记命令，直接开控制台：
+
+```bash
+node src/cli.mjs ui
+# 浏览器打开 http://127.0.0.1:7788
+```
+
+控制台里可以：
+
+- 填房间号、互动方式、关键词、限速、过滤规则
+- 填 SESSDATA / bili_jct / buvid3 和 LLM Key（保存后不回显）
+- 测试连接、测试 LLM、模拟一条弹幕看会怎么回
+- 一键启动 dry-run / 真实发送、停止
+- 看实时日志
+
+默认只监听 `127.0.0.1`。换端口：`--port 7789`；不要随便用 `--host 0.0.0.0`，那会让同网段的人也能打开控制台。
+
+## 快速开始（命令行）
 
 要求 **Node 22+**（收弹幕用到了全局 `WebSocket`）。
 
@@ -102,6 +121,7 @@ cp env.example .env
 ## 其他命令
 
 ```bash
+node src/cli.mjs ui       --port 7788          # 网页控制台
 node src/cli.mjs pre      --room 6            # 房间信息 / 账号 / 弹幕配置
 node src/cli.mjs history  --room 6 --limit 10 # 最近历史弹幕
 node src/cli.mjs send     --room 6 --msg "hi" --dry
@@ -122,6 +142,8 @@ live-assistant/
 │   ├── reply.mjs        # 触发规则 / 模板
 │   ├── llm.mjs          # 可选 LLM
 │   └── assistant.mjs    # 主循环 / 限速 / 重连
+├── src/server.mjs       # 本地网页控制台（HTTP + SSE）
+├── public/              # 控制台前端（原生 HTML/CSS/JS）
 ├── tests/
 ├── config.example.json
 └── package.json
