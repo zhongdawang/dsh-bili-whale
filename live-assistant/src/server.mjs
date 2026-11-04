@@ -12,6 +12,8 @@ import { BiliLiveApi } from './api.mjs'
 import { explainDecision } from './assistant.mjs'
 import { finalizeReply } from './reply.mjs'
 import { generateReply } from './llm.mjs'
+import { readUsage, recordUsage, usagePath } from './usage.mjs'
+import { emptyWarmupState, normalizeWarmupState } from './warmup.mjs'
 import { loadEnvFile, readJson } from './util.mjs'
 
 const SRC_DIR = path.dirname(fileURLToPath(import.meta.url))
@@ -128,6 +130,7 @@ export function startUiServer({ port = 7788, host = '127.0.0.1', configFile = pa
   let child = null
   let childDryRun = null
   let startedAt = null
+  const warmupPending = new Map()
 
   const broadcast = (payload) => {
     const line = `data: ${JSON.stringify(payload)}\n\n`
@@ -152,6 +155,10 @@ export function startUiServer({ port = 7788, host = '127.0.0.1', configFile = pa
     return path.resolve(path.dirname(configFile), cfg.dataDir || './data')
   }
   const readCount = () => readJson(path.join(resolvedDataDir(), 'state.json'), { date: '', count: 0 })
+  const usageFile = () => usagePath(resolvedDataDir())
+  const warmupStateFile = () => path.join(resolvedDataDir(), 'warmup-state.json')
+  const readUsageState = () => readUsage(usageFile())
+  const readWarmupState = () => normalizeWarmupState(readJson(warmupStateFile(), emptyWarmupState()))
 
   const credentialPath = () => {
     const cfg = merged()
@@ -345,6 +352,46 @@ export function startUiServer({ port = 7788, host = '127.0.0.1', configFile = pa
 
   const broadcastStatus = () => broadcast({ type: 'status', status: status() })
 
+  function requestWarmup({ action = 'preview', text = '' } = {}) {
+    if (!child) throw new Error('助手还没启动，先点“启动”')
+    if (typeof child.send !== 'function') throw new Error('当前启动方式不支持手动热场，请重启控制台')
+    const id = crypto.randomUUID()
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        warmupPending.delete(id)
+        reject(new Error('热场超时（60 秒）'))
+      }, 60_000)
+      warmupPending.set(id, { resolve, reject, timer })
+      try {
+        child.send({ type: 'warmup', id, action, text })
+      } catch (e) {
+        clearTimeout(timer)
+        warmupPending.delete(id)
+        reject(e)
+      }
+    })
+  }
+
+  // 让控制台的 token / 热场状态跟着助手实时更新。
+  let lastUsageRaw = ''
+  let lastWarmupRaw = ''
+  const stateTimer = setInterval(() => {
+    try {
+      const usage = readUsageState()
+      const usageRaw = JSON.stringify(usage)
+      if (usageRaw !== lastUsageRaw) {
+        lastUsageRaw = usageRaw
+        broadcast({ type: 'usage', usage })
+      }
+      const warmup = readWarmupState()
+      const warmupRaw = JSON.stringify(warmup)
+      if (warmupRaw !== lastWarmupRaw) {
+        lastWarmupRaw = warmupRaw
+        broadcast({ type: 'warmup-state', warmup })
+      }
+    } catch {}
+  }, 3000)
+
   function normalizeConfig(input) {
     const raw = rawConfig()
     const out = { ...raw }
@@ -356,6 +403,7 @@ export function startUiServer({ port = 7788, host = '127.0.0.1', configFile = pa
     const r = { ...(raw.reply ?? {}) }
     if (rIn.triggers !== undefined) r.triggers = toList(rIn.triggers).filter((t) => TRIGGERS.includes(t))
     if (rIn.allowSelf !== undefined) r.allowSelf = toBool(rIn.allowSelf, rBase.allowSelf)
+    if (rIn.persona !== undefined) r.persona = toText(rIn.persona, rBase.persona).slice(0, 4000)
     if (rIn.ownerMid !== undefined) r.ownerMid = toInt(rIn.ownerMid, rBase.ownerMid)
     if (rIn.aliases !== undefined) r.aliases = toList(rIn.aliases)
     if (rIn.ignoreUids !== undefined) r.ignoreUids = toList(rIn.ignoreUids).map(Number).filter(Number.isFinite)
@@ -396,6 +444,25 @@ export function startUiServer({ port = 7788, host = '127.0.0.1', configFile = pa
       sameTextWindowMs: toInt(tIn.sameTextWindowMs, tBase.sameTextWindowMs, 0, 86_400_000),
     }
 
+    if (input.warmup !== undefined) {
+      const wBase = merge(DEFAULTS.warmup, raw.warmup ?? {})
+      const wIn = input.warmup ?? {}
+      out.warmup = {
+        ...(raw.warmup ?? {}),
+        enabled: toBool(wIn.enabled, wBase.enabled),
+        idleSec: toInt(wIn.idleSec, wBase.idleSec, 30, 86_400),
+        minIntervalSec: toInt(wIn.minIntervalSec, wBase.minIntervalSec, 0, 86_400),
+        maxPerHour: toInt(wIn.maxPerHour, wBase.maxPerHour, 0, 60),
+        maxPerDay: toInt(wIn.maxPerDay, wBase.maxPerDay, 0, 500),
+        maxConsecutive: toInt(wIn.maxConsecutive, wBase.maxConsecutive, 0, 20),
+        longCooldownSec: toInt(wIn.longCooldownSec, wBase.longCooldownSec, 0, 86_400),
+        quietHours: toText(wIn.quietHours, wBase.quietHours).slice(0, 200),
+        minOnline: toInt(wIn.minOnline, wBase.minOnline, 0, 1_000_000),
+        useLLM: toBool(wIn.useLLM, wBase.useLLM),
+        topics: wIn.topics !== undefined ? toLines(wIn.topics).slice(0, 50) : toList(wBase.topics).slice(0, 50),
+      }
+    }
+
     for (const key of ['welcome', 'gift']) {
       if (input[key] !== undefined) {
         const base = merge(DEFAULTS[key], raw[key] ?? {})
@@ -423,6 +490,8 @@ export function startUiServer({ port = 7788, host = '127.0.0.1', configFile = pa
     ...status(),
     config: merged(),
     secrets: secretState(),
+    usage: readUsageState(),
+    warmup: readWarmupState(),
   })
 
   async function testConnection() {
@@ -493,16 +562,37 @@ export function startUiServer({ port = 7788, host = '127.0.0.1', configFile = pa
     child = spawn(process.execPath, args, {
       cwd: ROOT,
       env: process.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
     })
     childDryRun = dryRun
     startedAt = Date.now()
     addLog(`— 启动${dryRun ? '（dry-run）' : '（真实发送）'} pid=${child.pid} —`)
     readline.createInterface({ input: child.stdout }).on('line', (line) => addLog(line))
     readline.createInterface({ input: child.stderr }).on('line', (line) => addLog(`[err] ${line}`))
-    child.on('error', (e) => addLog(`[err] 启动失败：${e.message}`))
+    child.on('message', (message) => {
+      if (!message || message.type !== 'warmup-result') return
+      const pending = warmupPending.get(message.id)
+      if (!pending) return
+      clearTimeout(pending.timer)
+      warmupPending.delete(message.id)
+      if (message.ok) pending.resolve(message)
+      else pending.reject(new Error(message.error || '热场失败'))
+    })
+    child.on('error', (e) => {
+      addLog(`[err] 启动失败：${e.message}`)
+      for (const [id, pending] of warmupPending) {
+        clearTimeout(pending.timer)
+        pending.reject(new Error('助手启动失败'))
+        warmupPending.delete(id)
+      }
+    })
     child.on('exit', (code, signal) => {
       addLog(`— 已停止（code=${code ?? '-'} signal=${signal ?? '-'}）—`)
+      for (const [id, pending] of warmupPending) {
+        clearTimeout(pending.timer)
+        pending.reject(new Error('助手已停止'))
+        warmupPending.delete(id)
+      }
       child = null
       childDryRun = null
       startedAt = null
@@ -562,6 +652,8 @@ export function startUiServer({ port = 7788, host = '127.0.0.1', configFile = pa
       clients.add(res)
       res.write(`data: ${JSON.stringify({ type: 'history', lines: logs })}\n\n`)
       res.write(`data: ${JSON.stringify({ type: 'status', status: status() })}\n\n`)
+      res.write(`data: ${JSON.stringify({ type: 'usage', usage: readUsageState() })}\n\n`)
+      res.write(`data: ${JSON.stringify({ type: 'warmup-state', warmup: readWarmupState() })}\n\n`)
       const ping = setInterval(() => { try { res.write(': ping\n\n') } catch {} }, 15_000)
       req.on('close', () => { clearInterval(ping); clients.delete(res) })
       return
@@ -610,11 +702,32 @@ export function startUiServer({ port = 7788, host = '127.0.0.1', configFile = pa
       }
       if (pathname === '/api/test/llm') {
         const cfg = loadConfig(configFile)
-        const reply = await generateReply({
+        const generated = await generateReply({
           event: { uname: '测试观众', text: '你好，随便聊一句' },
           config: cfg.reply.llm,
+          persona: cfg.reply.persona,
         })
-        json(res, 200, { ok: true, reply, final: finalizeReply(reply, cfg.reply.maxLen), maxLen: cfg.reply.maxLen })
+        await recordUsage(usageFile(), generated.usage, {
+          latencyMs: generated.latencyMs,
+          model: generated.model,
+          finishReason: generated.finishReason,
+        })
+        json(res, 200, {
+          ok: true,
+          reply: generated.text,
+          final: finalizeReply(generated.text, cfg.reply.maxLen),
+          maxLen: cfg.reply.maxLen,
+          usage: generated.usage,
+          latencyMs: generated.latencyMs,
+          model: generated.model,
+        })
+        return
+      }
+      if (pathname === '/api/warmup') {
+        const action = body.action === 'send' ? 'send' : body.action === 'preview' ? 'preview' : ''
+        if (!action) throw new Error('action 必须是 preview 或 send')
+        const result = await requestWarmup({ action, text: toText(body.text).slice(0, 500) })
+        json(res, 200, { ...result })
         return
       }
       if (pathname === '/api/simulate') {
@@ -649,6 +762,8 @@ export function startUiServer({ port = 7788, host = '127.0.0.1', configFile = pa
     })
   })
 
+  server.on('close', () => clearInterval(stateTimer))
+
   server.on('error', (e) => {
     console.error(`控制台启动失败：${e.message}`)
     if (e.code === 'EADDRINUSE') console.error(`  端口 ${port} 被占用了，换一个：--port 7789`)
@@ -666,6 +781,7 @@ export function startUiServer({ port = 7788, host = '127.0.0.1', configFile = pa
 
   const shutdown = () => {
     stopAssistant()
+    clearInterval(stateTimer)
     server.close(() => process.exit(0))
     setTimeout(() => process.exit(0), 2000)
   }

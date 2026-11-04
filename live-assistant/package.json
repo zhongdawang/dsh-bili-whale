@@ -1,6 +1,6 @@
 {
   "name": "bili-live-assistant",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "独立的 B 站直播间弹幕助手：进房、收弹幕、按规则 / LLM 回复。不依赖 DSH。",

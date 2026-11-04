@@ -1,7 +1,11 @@
 import path from 'node:path'
 import { connectDanmaku } from './ws.mjs'
 import { decide, pickTemplate, finalizeReply } from './reply.mjs'
-import { generateReply } from './llm.mjs'
+import { generateReply, generateWarmup } from './llm.mjs'
+import { recordUsage, usagePath } from './usage.mjs'
+import {
+  emptyWarmupState, markActivity, markWarmup, normalizeWarmupState, pickWarmupTopic, warmupDecision,
+} from './warmup.mjs'
 import { log, readJson, writeJson } from './util.mjs'
 
 const today = () => new Date().toLocaleDateString('sv-SE')
@@ -65,7 +69,10 @@ function waitOrStop(ms, isStopped) {
  */
 export async function startAssistant({ config, api, dryRun = true, verbose = false, stopSignal }) {
   const stateFile = path.join(config.dataDir, 'state.json')
+  const usageFile = usagePath(config.dataDir)
+  const warmupStateFile = path.join(config.dataDir, 'warmup-state.json')
   const state = readJson(stateFile, { date: today(), count: 0 }) ?? { date: today(), count: 0 }
+  let warmupState = normalizeWarmupState(readJson(warmupStateFile, emptyWarmupState()))
   const seen = new Set()
   const lastUser = new Map()
   const lastText = new Map()
@@ -73,9 +80,15 @@ export async function startAssistant({ config, api, dryRun = true, verbose = fal
   const recent = []
   let lastGlobal = 0
   let replying = false
+  let lastActivityAt = Date.now()
+  let lastWarmupSkipLog = 0
 
   const roomInfo = await api.resolveRoom(config.room)
   const roomId = roomInfo.room_id
+  let roomTitle = String(roomInfo.title ?? '')
+  let roomLive = roomInfo.live_status === 1
+  let roomOnline = Number(roomInfo.online ?? 0)
+  let lastRoomRefresh = Date.now()
   let self = { mid: 0, uname: '' }
   try { self = await api.nav() } catch (e) { log(`匿名模式（nav 读取失败）：${e.message}`) }
   if (self.uname && !(config.reply.aliases ?? []).includes(self.uname)) config.reply.aliases.push(self.uname)
@@ -94,10 +107,10 @@ export async function startAssistant({ config, api, dryRun = true, verbose = fal
     if (!process.env[keyEnv]) log(`⚠ 开了 LLM 但没找到 ${keyEnv}，会退回模板回复（在控制台“凭据 / 密钥”里填）`)
   }
 
-  function passedThrottle(event, replyText) {
+  function passedThrottle(event, replyText, { skipUserCooldown = false } = {}) {
     const now = Date.now()
     if (now - lastGlobal < config.throttle.globalCooldownMs) return '全局冷却'
-    if (now - (lastUser.get(event.uid) ?? 0) < config.throttle.perUserCooldownMs) return '同用户冷却'
+    if (!skipUserCooldown && now - (lastUser.get(event.uid) ?? 0) < config.throttle.perUserCooldownMs) return '同用户冷却'
     if (state.date !== today()) { state.date = today(); state.count = 0 }
     if (state.count >= config.throttle.dailyCap) return '今日上限'
     const key = `${event.uid}|${replyText}`
@@ -111,7 +124,20 @@ export async function startAssistant({ config, api, dryRun = true, verbose = fal
       const llm = config.reply.llm
       const keyEnv = llm?.apiKeyEnv || 'LLM_API_KEY'
       if (llm?.enabled && process.env[keyEnv]) {
-        try { reply = finalizeReply(await generateReply({ event, config: llm, recent }), config.reply.maxLen) } catch (e) {
+        try {
+          const generated = await generateReply({
+            event,
+            config: llm,
+            recent,
+            persona: config.reply.persona,
+          })
+          await recordUsage(usageFile, generated.usage, {
+            latencyMs: generated.latencyMs,
+            model: generated.model,
+            finishReason: generated.finishReason,
+          })
+          reply = finalizeReply(generated.text, config.reply.maxLen)
+        } catch (e) {
           log(`LLM 失败：${e.message}`)
         }
       }
@@ -119,7 +145,7 @@ export async function startAssistant({ config, api, dryRun = true, verbose = fal
     }
     if (!reply) return false
 
-    const blocked = passedThrottle(event, reply)
+    const blocked = passedThrottle(event, reply, { skipUserCooldown: event.kind === 'warmup' })
     if (blocked) { log(`跳过（${blocked}）：${event.uname} → ${reply}`); return false }
 
     const now = Date.now()
@@ -160,6 +186,9 @@ export async function startAssistant({ config, api, dryRun = true, verbose = fal
       }
     }
 
+    lastActivityAt = Date.now()
+    warmupState = markActivity(warmupState, lastActivityAt)
+
     if (verbose) log(`  ${event.uname}(${event.uid}): ${event.text}`)
     recent.push({ uname: event.uname, text: event.text })
     if (recent.length > 10) recent.shift()
@@ -173,8 +202,10 @@ export async function startAssistant({ config, api, dryRun = true, verbose = fal
   }
 
   async function onInteract(event) {
-    if (!config.welcome?.enabled || event.type !== 1) return
     if (self.mid && event.uid === self.mid) return
+    lastActivityAt = Date.now()
+    warmupState = markActivity(warmupState, lastActivityAt)
+    if (!config.welcome?.enabled || event.type !== 1) return
     if (replying) return
     replying = true
     try { await deliver(event, config.welcome.text, 'welcome') }
@@ -182,17 +213,130 @@ export async function startAssistant({ config, api, dryRun = true, verbose = fal
   }
 
   async function onGift(event) {
-    if (!config.gift?.enabled) return
     if (self.mid && event.uid === self.mid) return
+    lastActivityAt = Date.now()
+    warmupState = markActivity(warmupState, lastActivityAt)
+    if (!config.gift?.enabled) return
     if (replying) return
     replying = true
     try { await deliver(event, config.gift.text, 'gift') }
     finally { replying = false }
   }
 
+  async function refreshRoomInfo() {
+    if (Date.now() - lastRoomRefresh < 5 * 60_000) return
+    lastRoomRefresh = Date.now()
+    try {
+      const info = await api.resolveRoom(roomId)
+      roomTitle = String(info.title ?? roomTitle)
+      roomLive = info.live_status === 1
+      roomOnline = Number(info.online ?? 0)
+    } catch (e) {
+      if (verbose) log(`[热场] 房间状态刷新失败：${e.message}`)
+    }
+  }
+
+  async function runWarmup({ source = 'auto', preview = false, text = '' } = {}) {
+    const cfg = config.warmup ?? {}
+    let warm = finalizeReply(text, config.reply.maxLen)
+
+    if (!warm) {
+      const llm = config.reply.llm
+      const keyEnv = llm?.apiKeyEnv || 'LLM_API_KEY'
+      if (cfg.useLLM !== false && llm?.enabled && process.env[keyEnv]) {
+        try {
+          const generated = await generateWarmup({
+            config: llm,
+            persona: config.reply.persona,
+            topics: cfg.topics,
+            recent,
+            room: { title: roomTitle, uname: '主播', online: roomOnline },
+          })
+          await recordUsage(usageFile, generated.usage, {
+            latencyMs: generated.latencyMs,
+            model: generated.model,
+            finishReason: generated.finishReason,
+          })
+          warm = finalizeReply(generated.text, config.reply.maxLen)
+        } catch (e) {
+          log(`[热场] LLM 失败：${e.message}`)
+        }
+      }
+      if (!warm) warm = finalizeReply(pickWarmupTopic(cfg.topics, warmupState.lastTexts), config.reply.maxLen)
+    }
+    if (!warm) throw new Error('没有可用的话题，先在控制台填“话题库”')
+    if (preview) return { text: warm, preview: true, sent: false, dryRun }
+
+    const event = { uid: 0, uname: '直播间', text: '', dmid: `warmup-${Date.now()}`, kind: 'warmup' }
+    const sent = await deliver(event, warm, source === 'manual' ? 'warmup-manual' : 'warmup')
+    if (sent && !dryRun) {
+      warmupState = markWarmup(warmupState, warm, Date.now())
+    } else {
+      // dry-run 不消耗额度，只记“刚试过”，避免自动热场每 30 秒刷一次日志。
+      warmupState = { ...warmupState, lastAt: Date.now() }
+    }
+    writeJson(warmupStateFile, warmupState)
+    return { text: warm, sent, preview: false, dryRun }
+  }
+
+  async function checkWarmup() {
+    if (isStopped() || !config.warmup?.enabled || replying) return
+    await refreshRoomInfo()
+    const decision = warmupDecision({
+      now: Date.now(),
+      cfg: config.warmup,
+      state: warmupState,
+      lastActivityAt,
+      live: roomLive,
+      online: roomOnline,
+    })
+    if (!decision.allowed) {
+      if (verbose && Date.now() - lastWarmupSkipLog > 5 * 60_000) {
+        lastWarmupSkipLog = Date.now()
+        log(`[热场] 跳过：${decision.reason}`)
+      }
+      return
+    }
+    replying = true
+    try {
+      const result = await runWarmup({ source: 'auto' })
+      if (result.sent) log(`[热场] ${result.dryRun ? 'dry-run' : '✓'} ${result.text}`)
+      else log('[热场] 没发出去（被限速或发送失败）')
+    } catch (e) {
+      log(`[热场] 失败：${e.message}`)
+    } finally {
+      replying = false
+    }
+  }
+
+  async function onIpcMessage(message) {
+    if (!message || message.type !== 'warmup') return
+    if (replying) {
+      process.send?.({ type: 'warmup-result', id: message.id, ok: false, error: '正在处理另一条弹幕，稍后再试' })
+      return
+    }
+    replying = true
+    try {
+      const result = await runWarmup({
+        source: 'manual',
+        preview: message.action === 'preview',
+        text: message.text,
+      })
+      process.send?.({ type: 'warmup-result', id: message.id, ok: true, ...result })
+    } catch (e) {
+      process.send?.({ type: 'warmup-result', id: message.id, ok: false, error: e.message })
+    } finally {
+      replying = false
+    }
+  }
+  if (typeof process.send === 'function') process.on('message', onIpcMessage)
+
   let socket = null
   let stopped = false
   const isStopped = () => stopped || !!stopSignal?.aborted
+  const warmupTimer = config.warmup?.enabled
+    ? setInterval(() => { checkWarmup().catch((e) => log(`[热场] 检查失败：${e.message}`)) }, 30_000)
+    : null
   // Ctrl-C 时主动关 socket，否则会一直挂在“已连接”状态退不出去。
   const onAbort = () => { stopped = true; try { socket?.close() } catch {} }
   stopSignal?.addEventListener?.('abort', onAbort, { once: true })
@@ -250,6 +394,8 @@ export async function startAssistant({ config, api, dryRun = true, verbose = fal
   }
 
   try { socket?.close() } catch {}
+  if (warmupTimer) clearInterval(warmupTimer)
+  if (typeof process.send === 'function') process.off('message', onIpcMessage)
   stopSignal?.removeEventListener?.('abort', onAbort)
   log('已停止')
 }

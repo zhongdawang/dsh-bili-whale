@@ -62,6 +62,10 @@
         <section class="card">
           <h2>回复内容</h2>
           <label class="check strong"><input type="checkbox" id="llmEnabled"> 用 LLM 生成回复</label>
+          <label class="field">
+            <span>人设（会拼到系统提示词前面）</span>
+            <textarea id="persona" rows="3" placeholder="例如：你是中哥直播间的 AI 小助理。口语化、像真人，接梗快，适度捧场但不油腻。"></textarea>
+          </label>
           <div class="grid2">
             <label class="field"><span>服务商</span>
               <select id="llmProvider">
@@ -148,6 +152,33 @@
         </section>
 
         <section class="card">
+          <h2>智能热场</h2>
+          <label class="check strong"><input type="checkbox" id="warmupEnabled"> 启用自动热场</label>
+          <div class="hint">没人说话时主动发一句；默认关闭，先预览看看语气。</div>
+          <div class="grid4">
+            <label class="field"><span>安静多少秒</span><input id="warmupIdle" type="number" min="30" step="30"></label>
+            <label class="field"><span>两次最小间隔</span><input id="warmupInterval" type="number" min="0" step="30"></label>
+            <label class="field"><span>每小时上限</span><input id="warmupMaxHour" type="number" min="0"></label>
+            <label class="field"><span>每天上限</span><input id="warmupMaxDay" type="number" min="0"></label>
+          </div>
+          <div class="grid4">
+            <label class="field"><span>连续没人接几次</span><input id="warmupMaxConsecutive" type="number" min="0"></label>
+            <label class="field"><span>长冷却（秒）</span><input id="warmupLongCooldown" type="number" min="0"></label>
+            <label class="field"><span>安静时段</span><input id="warmupQuietHours" placeholder="02:00-08:00"></label>
+            <label class="field"><span>最低在线</span><input id="warmupMinOnline" type="number" min="0"></label>
+          </div>
+          <label class="check"><input type="checkbox" id="warmupUseLLM"> 用 LLM 生成热场话题</label>
+          <label class="field"><span>话题库（每行一个）</span><textarea id="warmupTopics" rows="5" spellcheck="false"></textarea></label>
+          <div class="row">
+            <button id="btnWarmupPreview" class="ghost">预览一条</button>
+            <button id="btnWarmupSend" class="ghost">立即热场</button>
+            <button id="btnWarmupSendPreview" class="ghost" disabled>发送预览的那条</button>
+          </div>
+          <div class="result" id="warmupResult"></div>
+          <div class="hint" id="warmupStatus">—</div>
+        </section>
+
+        <section class="card">
           <h2>测试回复</h2>
           <div class="grid2">
             <label class="field"><span>观众昵称</span><input id="simName" placeholder="阿伟"></label>
@@ -159,6 +190,16 @@
       </div>
 
       <aside class="col side">
+        <section class="card">
+          <h2>Token 用量</h2>
+          <div class="usageGrid">
+            <div><span>今日总计</span><strong id="usageTotal">0</strong></div>
+            <div><span>输入</span><strong id="usageInput">0</strong></div>
+            <div><span>输出</span><strong id="usageOutput">0</strong></div>
+            <div><span>推理</span><strong id="usageReasoning">0</strong></div>
+          </div>
+          <div class="hint" id="usageMeta">还没有调用记录</div>
+        </section>
         <section class="card logsCard">
           <h2>实时日志 <button id="btnClear" class="mini">清空</button></h2>
           <pre id="logs" class="logs"></pre>

@@ -1,6 +1,7 @@
 const $ = (id) => document.getElementById(id)
 let lastConfig = null
 let toastTimer = null
+let lastWarmupPreview = ''
 
 const PROVIDERS = {
   deepseek: { baseUrl: 'https://api.deepseek.com', models: ['deepseek-chat', 'deepseek-reasoner'] },
@@ -83,6 +84,7 @@ function fill(config) {
   $('llmMaxTokens').value = config.reply?.llm?.maxTokens ?? 512
   $('llmContextMessages').value = config.reply?.llm?.contextMessages ?? 0
   $('llmPrompt').value = config.reply?.llm?.systemPrompt ?? ''
+  $('persona').value = config.reply?.persona ?? ''
 
   const provider = inferProvider(config.reply?.llm?.baseUrl)
   $('llmProvider').value = provider
@@ -100,6 +102,19 @@ function fill(config) {
   $('giftEnabled').checked = !!config.gift?.enabled
   $('giftText').value = config.gift?.text ?? ''
   $('entryEnabled').checked = config.entry?.enabled !== false
+
+  const w = config.warmup ?? {}
+  $('warmupEnabled').checked = !!w.enabled
+  $('warmupIdle').value = w.idleSec ?? 300
+  $('warmupInterval').value = w.minIntervalSec ?? 600
+  $('warmupMaxHour').value = w.maxPerHour ?? 4
+  $('warmupMaxDay').value = w.maxPerDay ?? 20
+  $('warmupMaxConsecutive').value = w.maxConsecutive ?? 2
+  $('warmupLongCooldown').value = w.longCooldownSec ?? 1800
+  $('warmupQuietHours').value = w.quietHours ?? ''
+  $('warmupMinOnline').value = w.minOnline ?? 1
+  $('warmupUseLLM').checked = w.useLLM !== false
+  $('warmupTopics').value = (w.topics ?? []).join('\n')
 }
 
 function collectConfig() {
@@ -113,6 +128,7 @@ function collectConfig() {
     reply: {
       triggers: [...document.querySelectorAll('[data-trigger]:checked')].map((el) => el.dataset.trigger),
       allowSelf: $('allowSelf').checked,
+      persona: $('persona').value,
       ownerMid: num('ownerMid', 0),
       aliases: csv('aliases'),
       ignoreUids: csv('ignoreUids'),
@@ -138,6 +154,19 @@ function collectConfig() {
       perUserCooldownMs: Math.max(0, Math.round(num('perUserCooldown', 120) * 1000)),
       dailyCap: num('dailyCap', 120),
       sameTextWindowMs: Math.max(0, Math.round(num('sameTextWindow', 600) * 1000)),
+    },
+    warmup: {
+      enabled: $('warmupEnabled').checked,
+      idleSec: num('warmupIdle', 300),
+      minIntervalSec: num('warmupInterval', 600),
+      maxPerHour: num('warmupMaxHour', 4),
+      maxPerDay: num('warmupMaxDay', 20),
+      maxConsecutive: num('warmupMaxConsecutive', 2),
+      longCooldownSec: num('warmupLongCooldown', 1800),
+      quietHours: $('warmupQuietHours').value.trim(),
+      minOnline: num('warmupMinOnline', 1),
+      useLLM: $('warmupUseLLM').checked,
+      topics: lines('warmupTopics'),
     },
     welcome: { enabled: $('welcomeEnabled').checked, text: $('welcomeText').value },
     gift: { enabled: $('giftEnabled').checked, text: $('giftText').value },
@@ -176,11 +205,38 @@ function renderSecrets(secrets) {
   }
 }
 
+function renderUsage(usage) {
+  if (!usage) return
+  const fmt = (n) => Number(n ?? 0).toLocaleString('zh-CN')
+  $('usageTotal').textContent = fmt(usage.total)
+  $('usageInput').textContent = fmt(usage.input)
+  $('usageOutput').textContent = fmt(usage.output)
+  $('usageReasoning').textContent = fmt(usage.reasoning)
+  const parts = []
+  if (usage.calls) parts.push(`${fmt(usage.calls)} 次调用`)
+  if (usage.lastLatencyMs) parts.push(`最近 ${usage.lastLatencyMs}ms`)
+  if (usage.lastModel) parts.push(usage.lastModel)
+  if (usage.lastFinishReason) parts.push(`finish=${usage.lastFinishReason}`)
+  if (usage.date) parts.push(usage.date)
+  $('usageMeta').textContent = parts.length ? parts.join(' · ') : '还没有调用记录'
+}
+
+function renderWarmup(warmup) {
+  if (!warmup) return
+  const today = new Date().toLocaleDateString('sv-SE')
+  const times = Array.isArray(warmup.times) ? warmup.times.map(Number) : []
+  const todayCount = times.filter((t) => new Date(t).toLocaleDateString('sv-SE') === today).length
+  const last = warmup.lastAt ? new Date(warmup.lastAt).toLocaleTimeString('zh-CN') : '还没发过'
+  $('warmupStatus').textContent = `今天 ${todayCount} 条 · 连续 ${warmup.consecutive ?? 0} 次没人接 · 上次 ${last}`
+}
+
 async function load() {
   const data = await api('/api/state')
   fill(data.config)
   renderStatus(data)
   renderSecrets(data.secrets)
+  renderUsage(data.usage)
+  renderWarmup(data.warmup)
 }
 
 async function saveConfig(silent = false) {
@@ -246,9 +302,46 @@ async function testLlm() {
     const data = await api('/api/test/llm', 'POST', {})
     const text = data.final ?? data.reply
     const cut = data.final && data.reply && data.final !== data.reply
-    $('llmResult').textContent = `回复：${text}${cut ? `（已按 ${data.maxLen} 字截断）` : ''}`
+    const usage = data.usage ? ` · ${Number(data.usage.total ?? 0).toLocaleString('zh-CN')} tokens` : ''
+    $('llmResult').textContent = `回复：${text}${usage}${cut ? `（已按 ${data.maxLen} 字截断）` : ''}`
   } catch (e) {
     $('llmResult').textContent = `失败：${e.message}`
+  }
+}
+
+async function warmupPreview() {
+  await saveConfig(true)
+  $('warmupResult').textContent = '生成中…'
+  try {
+    const data = await api('/api/warmup', 'POST', { action: 'preview' })
+    lastWarmupPreview = data.text ?? ''
+    $('warmupResult').textContent = `预览：${lastWarmupPreview}`
+    $('btnWarmupSendPreview').disabled = !lastWarmupPreview
+  } catch (e) {
+    $('warmupResult').textContent = `✗ ${e.message}`
+    lastWarmupPreview = ''
+    $('btnWarmupSendPreview').disabled = true
+  }
+}
+
+async function warmupSend(text = '') {
+  const preview = text ? `\n\n${text}` : ''
+  if (!confirm(`现在发一条热场弹幕？${preview}`)) return
+  await saveConfig(true)
+  $('warmupResult').textContent = '发送中…'
+  try {
+    const data = await api('/api/warmup', 'POST', { action: 'send', text })
+    $('warmupResult').textContent = data.dryRun
+      ? `dry-run（未真的发送）：${data.text}`
+      : data.sent ? `已发送：${data.text}` : `没发出去：${data.text}`
+    if (data.sent && !data.dryRun) {
+      lastWarmupPreview = ''
+      $('btnWarmupSendPreview').disabled = true
+      toast('热场已发送')
+    }
+  } catch (e) {
+    $('warmupResult').textContent = `✗ ${e.message}`
+    toast(e.message, true)
   }
 }
 
@@ -385,6 +478,10 @@ function bindLogs() {
       append(message.line)
     } else if (message.type === 'status') {
       renderStatus(message.status)
+    } else if (message.type === 'usage') {
+      renderUsage(message.usage)
+    } else if (message.type === 'warmup-state') {
+      renderWarmup(message.warmup)
     }
   }
 }
@@ -400,6 +497,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('btnTestLlm').onclick = () => testLlm()
   $('btnModels').onclick = () => fetchModels()
   $('llmProvider').onchange = () => applyProvider()
+  $('btnWarmupPreview').onclick = () => warmupPreview().catch((e) => { $('warmupResult').textContent = `✗ ${e.message}` })
+  $('btnWarmupSend').onclick = () => warmupSend().catch((e) => toast(e.message, true))
+  $('btnWarmupSendPreview').onclick = () => warmupSend(lastWarmupPreview).catch((e) => toast(e.message, true))
   $('btnQrLogin').onclick = () => openQrModal().catch((e) => toast(e.message, true))
   $('btnQrRefresh').onclick = () => startQrFlow()
   $('btnQrClose').onclick = () => closeQrModal()

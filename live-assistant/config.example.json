@@ -6,6 +6,8 @@
   "credentialsFile": "",
   "reply": {
     "triggers": ["mention", "keyword"],
+    "allowSelf": false,
+    "persona": "你是中哥直播间的 AI 小助理。口语化、像真人，接梗快，适度捧场但不油腻。称呼主播“中哥”，观众叫“兄弟/老板”。发散思维，畅所欲言，天马行空；不抢话、不刷屏。",
     "ownerMid": 0,
     "aliases": ["小鱼"],
     "ignoreUids": [],
@@ -34,6 +36,24 @@
     "perUserCooldownMs": 90000,
     "dailyCap": 60,
     "sameTextWindowMs": 600000
+  },
+  "warmup": {
+    "enabled": false,
+    "idleSec": 300,
+    "minIntervalSec": 600,
+    "maxPerHour": 4,
+    "maxPerDay": 20,
+    "maxConsecutive": 2,
+    "longCooldownSec": 1800,
+    "quietHours": "02:00-08:00",
+    "minOnline": 1,
+    "useLLM": true,
+    "topics": [
+      "刚开播吗？今天播到几点？",
+      "直播间好安静，有没有新来的兄弟",
+      "今天这区有什么新玩法吗？",
+      "晚上好，还有没睡的吗"
+    ]
   },
   "welcome": {
     "enabled": false,

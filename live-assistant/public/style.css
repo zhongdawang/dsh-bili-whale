@@ -207,6 +207,24 @@ code { color: var(--pink2); background: rgba(251,114,153,.08); padding: 1px 5px;
 .tag.ok { color: var(--green); border-color: rgba(61,220,151,.35); background: rgba(61,220,151,.08); }
 .tag.no { color: var(--red); border-color: rgba(255,98,98,.3); background: rgba(255,98,98,.07); }
 
+.usageGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.usageGrid > div {
+  background: #0d1015;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 9px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.usageGrid span { color: var(--muted); font-size: 11px; }
+.usageGrid strong { font-size: 18px; font-variant-numeric: tabular-nums; line-height: 1.2; }
+
 .logsCard { position: sticky; top: 16px; }
 .logs {
   margin: 0;

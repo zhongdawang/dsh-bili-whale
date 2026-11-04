@@ -12,6 +12,8 @@ export const DEFAULTS = {
     triggers: ['mention', 'keyword'],
     // 单号测试用：允许回复“自己账号”发的弹幕；会跳过自己刚发出去的回复，防循环。
     allowSelf: false,
+    // 人设：会拼到 LLM 系统提示词前面；留空 = 只使用系统提示词。
+    persona: '',
     ownerMid: 0,
     aliases: [],
     ignoreUids: [],
@@ -40,6 +42,25 @@ export const DEFAULTS = {
     perUserCooldownMs: 90_000,
     dailyCap: 60,
     sameTextWindowMs: 10 * 60_000,
+  },
+  // 智能热场：没人说话时主动发一句。默认关闭，先看 dry-run 效果。
+  warmup: {
+    enabled: false,
+    idleSec: 300,
+    minIntervalSec: 600,
+    maxPerHour: 4,
+    maxPerDay: 20,
+    maxConsecutive: 2,
+    longCooldownSec: 1800,
+    quietHours: '02:00-08:00',
+    minOnline: 1,
+    useLLM: true,
+    topics: [
+      '刚开播吗？今天播到几点？',
+      '直播间好安静，有没有新来的兄弟',
+      '今天这区有什么新玩法吗？',
+      '晚上好，还有没睡的吗',
+    ],
   },
   welcome: { enabled: false, text: '欢迎 {name} 进入直播间～' },
   gift: { enabled: false, text: '感谢 {name} 的 {gift}～' },
