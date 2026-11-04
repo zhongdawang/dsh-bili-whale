@@ -27,6 +27,23 @@ export function expandHome(file) {
   return file
 }
 
+/**
+ * 读一个 .env（可选）：KEY=VALUE，支持引号，不覆盖已有环境变量。
+ * 这样 LLM_API_KEY / BILI_* 可以写在文件里，不用每次 export。
+ */
+export function loadEnvFile(file = path.resolve('.env')) {
+  if (!fs.existsSync(file)) return
+  for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+    const match = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line)
+    if (!match) continue
+    let value = match[2]
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1)
+    }
+    if (!(match[1] in process.env)) process.env[match[1]] = value
+  }
+}
+
 export function readJson(file, fallback = null) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')) } catch { return fallback }
 }

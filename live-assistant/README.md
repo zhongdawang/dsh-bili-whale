@@ -40,6 +40,13 @@ node src/cli.mjs start --room 6 --go
 
 只读命令（`pre` / `history` / `start` 的 dry-run）没有凭据也能跑；真发必须有 `SESSDATA` + `bili_jct`。
 
+也可以把所有密钥放进 `.env`（启动时自动读取，已被 gitignore）：
+
+```bash
+cp env.example .env
+# 编辑 .env：LLM_API_KEY / BILI_SESSDATA / BILI_JCT / BILI_BUVID3
+```
+
 ## 互动档位
 
 改 `reply.triggers` 即可：

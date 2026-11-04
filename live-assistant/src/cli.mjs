@@ -3,7 +3,7 @@ import { loadConfig } from './config.mjs'
 import { loadCredentials, hasWriteCredentials } from './credentials.mjs'
 import { BiliLiveApi, DANMAKU_HINTS } from './api.mjs'
 import { startAssistant, explainDecision } from './assistant.mjs'
-import { parseArgs, log } from './util.mjs'
+import { parseArgs, log, loadEnvFile } from './util.mjs'
 
 const HELP = `直播间弹幕助手（独立版，不依赖 DSH）
 
@@ -36,6 +36,7 @@ function makeApi(values, config) {
 }
 
 async function main() {
+  loadEnvFile()
   const { command, values, flags } = parseArgs()
   if (!command || command === 'help' || flags.has('help')) {
     console.log(HELP)
